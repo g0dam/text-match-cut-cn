@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>中文文字快切 · 一个词生成报纸快切视频</title>
+<style>
+:root{--paper:#F4F1EA;--ink:#141414;--mute:#6B675E;--line:rgba(20,20,20,.14);--hl:#FFE45C}
+*{box-sizing:border-box}html,body{margin:0;background:var(--paper);color:var(--ink);font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:48px 24px;display:grid;grid-template-columns:1fr 360px;gap:48px;align-items:start}
+@media(max-width:860px){.wrap{grid-template-columns:1fr}}
+h1{font-family:"Songti SC","STSong","SimSun",serif;font-weight:900;font-size:56px;line-height:1.15;margin:0 0 16px;letter-spacing:-.01em}
+h1 mark{background:var(--hl);color:inherit;padding:0 .08em}
+p.sub{color:var(--mute);margin:0 0 32px;font-size:15px}
+label{display:block;font-size:12px;letter-spacing:.2em;color:var(--mute);margin:24px 0 8px}
+input[type=text]{width:100%;font:600 24px "Songti SC","STSong","SimSun",serif;padding:16px;border:1.5px solid var(--ink);background:#fff;border-radius:8px;outline:none}
+input[type=text]:focus{box-shadow:0 0 0 4px var(--hl)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1.5px solid var(--line);background:transparent;padding:8px 16px;border-radius:999px;cursor:pointer;font:inherit;font-size:14px}
+.chip.on{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.sw{width:32px;height:32px;border-radius:50%;border:2px solid transparent;cursor:pointer}.sw.on{border-color:var(--ink)}
+input[type=range]{width:100%;accent-color:var(--ink)}
+.go{margin-top:32px;width:100%;padding:16px;border:0;border-radius:8px;background:var(--ink);color:var(--paper);font:600 18px inherit;cursor:pointer;transition:transform .3s cubic-bezier(.32,.72,0,1)}
+.go:hover{transform:translateY(-2px)}.go:disabled{opacity:.5;cursor:wait}
+.note{font-size:12px;color:var(--mute);margin-top:16px;line-height:1.7}
+.stage{position:sticky;top:24px}
+canvas{width:100%;height:auto;display:block;border-radius:12px;box-shadow:0 24px 64px rgba(40,30,10,.18);background:#ddd}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:16px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--ink)}
+</style></head><body>
+<div class="wrap">
+  <div>
+    <h1>输入一个词，<br>生成<mark>文字快切</mark>。</h1>
+    <p class="sub">中文报纸版式 · 本地运行，不联网 · 无广告无水印 · 浏览器直接导出视频</p>
+    <label>关键词（最多 12 字）</label>
+    <input id="w" type="text" maxlength="12" value="下班">
+    <label>画幅</label>
+    <div class="row" id="ratio"><button class="chip on" data-r="1080x1920">9:16 竖屏</button><button class="chip" data-r="1080x1080">1:1</button><button class="chip" data-r="1920x1080">16:9</button></div>
+    <label>高亮色</label>
+    <div class="row" id="col"><span class="sw on" style="background:#FFE45C" data-c="#FFE45C"></span><span class="sw" style="background:#FF9EB5" data-c="#FF9EB5"></span><span class="sw" style="background:#9EE6B8" data-c="#9EE6B8"></span><span class="sw" style="background:#9CC8FF" data-c="#9CC8FF"></span></div>
+    <label>起始节奏 <b id="cv">10</b> 刀/秒</label>
+    <input id="cps" type="range" min="2" max="20" value="10">
+    <label>结束节奏 <b id="cv2">10</b> 刀/秒（与起始相同＝匀速，更大＝渐快）</label>
+    <input id="cps2" type="range" min="2" max="30" value="10">
+    <label>变速曲线</label>
+    <div class="row" id="curve"><button class="chip on" data-k="lin">匀加速</button><button class="chip" data-k="in">越来越急</button><button class="chip" data-k="out">先急后稳</button></div>
+    <label><input type="checkbox" id="hold"> 结尾定格 1 秒（做片头标题用）</label>
+    <label>自定义正文（可选：粘贴真实新闻或你的文案当报纸内容）</label>
+    <textarea id="txt" rows="3" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:8px;font:15px inherit;background:#fff"></textarea>
+    <label>真实报纸图片（可选，可多选：每一刀换一张当底，词贴在中间）</label>
+    <input id="imgs" type="file" accept="image/*" multiple>
+    <label>时长 <b id="dv">5</b> 秒</label>
+    <input id="dur" type="range" min="2" max="12" value="5">
+    <button class="go" id="go">生成并下载视频</button>
+    <div class="bar"><i id="pb"></i></div>
+    <p class="note">导出按实时录制，5 秒视频约需 5 秒。Chrome / Edge 输出 MP4，其他浏览器输出 WebM。<br>字体用系统自带的宋体 / 楷体 / 黑体（Mac、Windows 均可）。每次点“生成”都会换一组版式。</p>
+  </div>
+  <div class="stage"><canvas id="c" width="1080" height="1920"></canvas></div>
+</div>
+<script>// 中文文字快切引擎（纯函数）：drawMatchCut(ctx, W, H, word, t, opt)
+// 原理（拆自 textmatchcut 样片：4.8 s 约 45 刀）：每一刀换一整版“报纸”，关键词永远钉在画面同一点；
+// 远离焦点的行虚化，形成景深；每刀随机缩放/微旋/纸色，眼睛只追那块黄色。
+(function (G) {
+  const hsh = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+  const SONG = '"Songti SC","STSong","SimSun","Noto Serif CJK SC","Source Han Serif SC",serif';
+  const KAI = '"Kaiti SC","STKaiti","KaiTi","Songti SC",serif';
+  const HEI = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif';
+  const FILL = ('据知情人士透露，这场会议已经改期四次，最后被取消。居民表示并不意外。一只鸽子被暂时扣留，目前情绪稳定。' +
+    '相关负责人称，此事正在慢慢核实。现场没有人愿意被引用。报告长达十九页，什么也没解决。他说了两遍，没有人记下来。' +
+    '目击者对几乎所有细节都有分歧。邻居形容他安静，因为他总是这样。警方三小时后才到达，并没有带来新的消息。' +
+    '主席称这一决定“不够理想”，随后离开了大楼。一位专家接受了咨询，专家也很意外。许可证后来被证实从未提交。' +
+    '记者走访发现，大多数人只是路过。会上有人鼓掌，掌声持续了大约四秒。这件事据说还在继续。所有人都表示理解，但不同意。' +
+    '一份内部邮件被意外转发给了全公司。楼下的咖啡店当天照常营业。此前的说法被悄悄删除。没有人辞职。');
+  const TPL = [
+    w => `记者走访发现，${w}早已成为常态。`, w => `“${w}”，他重复了两遍。`, w => `关于${w}，相关部门暂无回应。`,
+    w => `据悉，${w}一事仍在调查中。`, w => `多名员工证实，${w}确有其事。`, w => `最终，${w}被写进了会议纪要。`,
+    w => `邻居们说，${w}其实早有预兆。`, w => `她坚持认为${w}并不是问题。`, w => `所有人都在等${w}。`,
+  ];
+  const HEAD = [w => `${w}，`, w => `专家：${w}`, w => `${w}再引热议`, w => `“${w}”之后`, w => `${w}，然后呢`];
+  const QUO = [w => `“我们讨论了三个小时，最后还是${w}。”`, w => `“没有人想到，${w}会来得这么快。”`, w => `“说到底，就是${w}。”`];
+  const fillAt = (n, off) => { let s = ''; let i = Math.floor(off * SRC.length); while (s.length < n) { s += SRC[i % SRC.length]; i++; } return s; };
+  let SRC = FILL;
+  const pick = (a, r) => a[Math.floor(r * a.length) % a.length];
+  const PAPER = ['#F4F1EA', '#EFECE4', '#F7F6F2', '#ECE8DE', '#F2EFE8'];
+
+  // 一刀的版式：返回 {lines:[{s, size, font, weight, color, focus?:[i0,i1]}], lh}
+  function layout(word, k, base) {
+    const r = i => hsh(k * 13.37 + i * 3.1 + 1), kind = Math.floor(r(0) * 5), L = [];
+    const sz = base * (kind === 1 ? 1.6 : kind === 3 ? .75 : kind === 2 ? 1.15 : kind === 4 ? 1.35 : 1.0) * (.9 + r(1) * .25);
+    const body = { size: sz, font: SONG, weight: '400', color: '#1A1916' };
+    if (kind === 1 || kind === 4) {                               // 大标题 / 快讯
+      const s = kind === 1 ? pick(HEAD, r(2))(word) : `快讯：${word}`;
+      const f = { ...body, s, font: kind === 4 ? HEI : SONG, weight: '900', focus: [s.indexOf(word), s.indexOf(word) + word.length] };
+      return { kind, sz, focus: f, body: { ...body, size: sz * .42 }, lh: 1.25 };
+    }
+    if (kind === 2) {                                             // 引语（楷体，代替英文斜体）
+      const s = pick(QUO, r(2))(word);
+      return { kind, sz, focus: { ...body, s, font: KAI, weight: '700', focus: [s.indexOf(word), s.indexOf(word) + word.length] }, body: { ...body, size: sz * .5 }, lh: 1.32 };
+    }
+    const s = fillAt(Math.floor(r(3) * 9) + 2, r(4)) + pick(TPL, r(5))(word) + fillAt(30, r(6));  // 正文 / 小字
+    return { kind, sz, focus: { ...body, s, focus: [s.indexOf(word), s.indexOf(word) + word.length] }, body, lh: kind === 3 ? 1.55 : 1.45, fillAt };
+  }
+
+  const bufs = new WeakMap();
+  function buf(ctx, W, H) {
+    let b = bufs.get(ctx);
+    if (!b || b.W !== W || b.H !== H) {
+      const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c; };
+      b = { W, H, a: mk(), z: mk() }; bufs.set(ctx, b);
+    }
+    return b;
+  }
+
+  // opt: {cps 每秒刀数=10, color 高亮色, seed}
+  function drawMatchCut(ctx, W, H, word, t, opt = {}) {
+    word = (word || '关键词').slice(0, 12);
+    SRC = opt.text && opt.text.replace(/\s+/g, '').length > 20 ? opt.text.replace(/\s+/g, '') : FILL;
+    const k = Math.floor(opt.cutAt ? opt.cutAt(t) : t * (opt.cps || 10)) + (opt.seed || 0) * 1000, hl = opt.color || '#FFE45C';
+    const base = Math.min(W, H) * .1, Lo = layout(word, k, base), r = i => hsh(k * 7.77 + i * 5.3 + 9);
+    const B = buf(ctx, W, H), a = B.a.getContext('2d');
+    const cx = W / 2, cy = H * .5, sc = .88 + r(1) * .3, rot = (r(2) - .5) * .04;
+    a.setTransform(1, 0, 0, 1, 0, 0); a.filter = 'none'; a.globalAlpha = 1;
+    a.fillStyle = PAPER[Math.floor(r(3) * PAPER.length)]; a.fillRect(0, 0, W, H);
+    const bgs = opt.bgs || [], useBg = bgs.length > 0;   // 真实报纸图片做底：每刀换一张、随机取景
+    if (useBg) { const im = bgs[k % bgs.length], s2 = Math.max(W / im.width, H / im.height) * (1.1 + r(5) * .6); a.drawImage(im, (W - im.width * s2) * r(6), (H - im.height * s2) * r(7), im.width * s2, im.height * s2); }
+    a.translate(cx, cy); a.rotate(rot); a.scale(sc, sc);
+    const F = Lo.focus, fs = F.size; a.font = `${F.weight} ${fs}px ${F.font}`; a.textBaseline = 'middle';
+    if (Lo.kind === 0 || Lo.kind === 3) { const need = Math.ceil(W / sc / fs) + 2; F.s = fillAt(need, hsh(k + .5)) + F.s; F.focus = [F.focus[0] + need, F.focus[1] + need]; }
+    const pre = F.s.slice(0, F.focus[0]), wpx = a.measureText(word).width, prew = a.measureText(pre).width;
+    const x0 = -prew - wpx / 2;                                    // 焦点词中心 = 画面中心
+    const span = W / sc * 1.4, lhF = fs * Lo.lh;
+    // 正文行：焦点行上下铺满
+    const bs = Lo.body.size, lhB = bs * Lo.lh;
+    a.font = `${Lo.body.weight} ${bs}px ${Lo.body.font}`; a.fillStyle = Lo.body.color; if (useBg) a.globalAlpha = 0;
+    const colL = Lo.kind === 0 || Lo.kind === 3 ? x0 - Math.ceil((x0 + span / 2) / bs) * bs : -span / 2 + bs, colR = colL + span;
+    const n = Math.ceil(H / sc / lhB) + 2, fill = fillAt;
+    const gapTop = Lo.kind === 0 || Lo.kind === 3 ? lhF / 2 : lhF * .9, gapBot = gapTop;
+    const chars = Math.ceil((colR - colL) / bs);
+    for (let j = 1; j < n; j++) {
+      for (const sgn of [-1, 1]) {
+        const y = sgn * ((sgn < 0 ? gapTop : gapBot) + (j - .5) * lhB);
+        const indent = hsh(k + j * sgn * 1.7) < .12 ? bs * 2 : 0, cut = hsh(k * 3 + j * sgn) < .1 ? .55 : 1;
+        a.fillText(fill(Math.floor(chars * cut), hsh(k * 1.3 + j * sgn * .77)), colL + indent, y);
+      }
+    }
+    a.globalAlpha = 1;
+    // 小字版式额外画一条分隔线
+    if (Lo.kind === 1 || Lo.kind === 2) { a.fillStyle = 'rgba(20,20,20,.55)'; a.fillRect(x0, -lhF * .78, Math.min(span, (prew + wpx) * 1.2 + fs), 2.5); a.fillRect(x0, lhF * .78, fs * 2, 2.5); }
+    // 焦点行
+    if (useBg) { a.fillStyle = 'rgba(244,241,234,.94)'; a.fillRect(-span, -lhF * .9, span * 2, lhF * 1.8); }
+    a.font = `${F.weight} ${fs}px ${F.font}`;
+    if (Lo.kind === 0 || Lo.kind === 3) a.fillStyle = Lo.body.color, a.fillText(F.s, x0, 0);
+    else { a.fillStyle = '#141414'; a.fillText(F.s, x0, 0); }
+    // 高亮块（画在词下面：用 multiply 叠上去，墨色不被盖住）
+    a.globalCompositeOperation = 'multiply'; a.fillStyle = hl;
+    const pad = fs * .1; a.fillRect(x0 + prew - pad, -fs * .62, wpx + 2 * pad, fs * 1.22);
+    a.globalCompositeOperation = 'source-over';
+    a.setTransform(1, 0, 0, 1, 0, 0);
+    // 景深：整版先虚，焦点带再叠清晰版
+    const z = B.z.getContext('2d'); z.setTransform(1, 0, 0, 1, 0, 0); z.globalCompositeOperation = 'source-over';
+    z.filter = `blur(${(base * .09 * (opt.blur ?? 1)).toFixed(1)}px)`; z.drawImage(B.a, 0, 0); z.filter = 'none';
+    const band = fs * (Lo.kind === 3 ? 2.2 : 1.6) * sc, g = z.createLinearGradient(0, cy - band * 2.4, 0, cy + band * 2.4);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.32, 'rgba(0,0,0,1)'); g.addColorStop(.68, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(B.z, 0, 0);
+    // 清晰带：用 a 的副本乘上渐变遮罩
+    z.globalCompositeOperation = 'copy'; z.drawImage(B.a, 0, 0); z.globalCompositeOperation = 'destination-in'; z.fillStyle = g; z.fillRect(0, 0, W, H); z.globalCompositeOperation = 'source-over';
+    ctx.drawImage(B.z, 0, 0);
+    // 暗角
+    const v = ctx.createRadialGradient(cx, cy, Math.min(W, H) * .3, cx, cy, Math.max(W, H) * .75);
+    v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(40,30,10,.22)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+    return { cut: k, kind: Lo.kind };
+  }
+  G.drawMatchCut = drawMatchCut;
+})(window);
+</script>
+<script>
+const $ = id => document.getElementById(id), cv = $('c'), ctx = cv.getContext('2d');
+let W = 1080, H = 1920, color = '#FFE45C', seed = 0, t0 = performance.now(), rec = null, curve = 'lin', bgs = [];
+const CURVE = { lin: u => u, in: u => u * u, out: u => 1 - (1 - u) * (1 - u) };
+function cutsAt(t) {                                   // 节奏可变：对“每秒刀数”积分得到第几刀
+  const D = +$('dur').value, c0 = +$('cps').value, c1 = +$('cps2').value;
+  if ($('hold').checked) t = Math.min(t, Math.max(.1, D - 1));
+  let n = 0; const dt = 1 / 240; for (let x = 0; x < t; x += dt) n += (c0 + (c1 - c0) * CURVE[curve](Math.min(1, x / D))) * Math.min(dt, t - x);
+  return n;
+}
+const opt = () => ({ cutAt: cutsAt, color, seed, text: $('txt').value, bgs });
+function loop(now) { if (!rec) drawMatchCut(ctx, W, H, $('w').value.trim(), ((now - t0) / 1000) % (+$('dur').value), opt()); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+document.querySelectorAll('#ratio .chip').forEach(b => b.onclick = () => { document.querySelectorAll('#ratio .chip').forEach(x => x.classList.remove('on')); b.classList.add('on'); [W, H] = b.dataset.r.split('x').map(Number); cv.width = W; cv.height = H; });
+document.querySelectorAll('#col .sw').forEach(b => b.onclick = () => { document.querySelectorAll('#col .sw').forEach(x => x.classList.remove('on')); b.classList.add('on'); color = b.dataset.c; });
+$('cps').oninput = () => $('cv').textContent = $('cps').value; $('cps2').oninput = () => $('cv2').textContent = $('cps2').value;
+document.querySelectorAll('#curve .chip').forEach(b => b.onclick = () => { document.querySelectorAll('#curve .chip').forEach(x => x.classList.remove('on')); b.classList.add('on'); curve = b.dataset.k; });
+$('imgs').onchange = e => { bgs = []; [...e.target.files].forEach(f => { const im = new Image(); im.onload = () => bgs.push(im); im.src = URL.createObjectURL(f); }); }; $('dur').oninput = () => $('dv').textContent = $('dur').value;
+$('go').onclick = async () => {
+  const mimes = ['video/mp4;codecs=avc1.640028', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'], mime = mimes.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+  if (!mime) return alert('这个浏览器不支持录制，请换 Chrome 或 Edge');
+  seed = Math.floor(Math.random() * 1e4); const D = +$('dur').value, word = $('w').value.trim() || '关键词';
+  const st = cv.captureStream(30), r = new MediaRecorder(st, { mimeType: mime, videoBitsPerSecond: 12e6 }), chunks = [];
+  r.ondataavailable = e => e.data.size && chunks.push(e.data); rec = r; $('go').disabled = true;
+  const start = performance.now();
+  const step = now => { const t = (now - start) / 1000; drawMatchCut(ctx, W, H, word, Math.min(t, D - .001), opt()); $('pb').style.width = Math.min(100, t / D * 100) + '%'; if (t < D) requestAnimationFrame(step); else r.stop(); };
+  r.onstop = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(chunks, { type: mime })); a.download = `文字快切_${word}.${mime.includes('mp4') ? 'mp4' : 'webm'}`; a.click(); rec = null; t0 = performance.now(); $('go').disabled = false; $('pb').style.width = '0'; };
+  r.start(); requestAnimationFrame(step);
+};
+</script>
+</body></html>
