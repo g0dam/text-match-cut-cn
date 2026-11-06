@@ -43,7 +43,8 @@ canvas{width:100%;height:auto;display:block;border-radius:12px;box-shadow:0 24px
     <label><input type="checkbox" id="hold"> 结尾定格 1 秒（做片头标题用）</label>
     <label>自定义正文（可选：粘贴真实新闻或你的文案当报纸内容）</label>
     <textarea id="txt" rows="3" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:8px;font:15px inherit;background:#fff"></textarea>
-    <p class="note" id="th" style="margin-top:8px">留空用内置新闻句。粘贴后整版报纸都用你的文字；其中含关键词的句子会成为高亮句。</p>
+    <label style="letter-spacing:0;font-size:13px;margin-top:8px"><input type="checkbox" id="tbg"> 背景小字也混入我的正文（默认只当高亮句，背景用多样的内置新闻）</label>
+    <p class="note" id="th" style="margin-top:8px">留空用内置新闻句。粘贴后，含关键词的句子会轮流成为高亮句。</p>
     <label>真实报纸图片（可选，可多选：每一刀换一张当底，词贴在中间）</label>
     <input id="imgs" type="file" accept="image/*" multiple>
     <label>时长 <b id="dv">5</b> 秒</label>
@@ -115,7 +116,7 @@ canvas{width:100%;height:auto;display:block;border-radius:12px;box-shadow:0 24px
   // opt: {cps 每秒刀数=10, color 高亮色, seed}
   function drawMatchCut(ctx, W, H, word, t, opt = {}) {
     word = (word || '关键词').slice(0, 12);
-    const ctext = (opt.text || '').trim(); SRC = ctext ? ctext.replace(/\s+/g, '') : FILL; CUST = ctext ? custSentences(ctext, (word || '').slice(0, 12)) : [];
+    const ctext = (opt.text || '').trim(); SRC = ctext && opt.textBg ? ctext.replace(/\s+/g, '') + FILL : FILL; CUST = ctext ? custSentences(ctext, (word || '').slice(0, 12)) : [];
     const k = Math.floor(opt.cutAt ? opt.cutAt(t) : t * (opt.cps || 10)) + (opt.seed || 0) * 1000, hl = opt.color || '#FFE45C';
     const base = Math.min(W, H) * .1, Lo = layout(word, k, base), r = i => hsh(k * 7.77 + i * 5.3 + 9);
     const B = buf(ctx, W, H), a = B.a.getContext('2d');
@@ -185,14 +186,14 @@ function cutsAt(t) {                                   // 节奏可变：对“�
   let n = 0; const dt = 1 / 240; for (let x = 0; x < t; x += dt) n += (c0 + (c1 - c0) * CURVE[curve](Math.min(1, x / D))) * Math.min(dt, t - x);
   return n;
 }
-const opt = () => ({ cutAt: cutsAt, color, seed, text: $('txt').value, bgs });
+const opt = () => ({ cutAt: cutsAt, color, seed, text: $('txt').value, textBg: $('tbg').checked, bgs });
 function loop(now) { if (!rec) drawMatchCut(ctx, W, H, $('w').value.trim(), ((now - t0) / 1000) % (+$('dur').value), opt()); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
 document.querySelectorAll('#ratio .chip').forEach(b => b.onclick = () => { document.querySelectorAll('#ratio .chip').forEach(x => x.classList.remove('on')); b.classList.add('on'); [W, H] = b.dataset.r.split('x').map(Number); cv.width = W; cv.height = H; });
 document.querySelectorAll('#col .sw').forEach(b => b.onclick = () => { document.querySelectorAll('#col .sw').forEach(x => x.classList.remove('on')); b.classList.add('on'); color = b.dataset.c; });
 $('cps').oninput = () => $('cv').textContent = $('cps').value; $('cps2').oninput = () => $('cv2').textContent = $('cps2').value;
 document.querySelectorAll('#curve .chip').forEach(b => b.onclick = () => { document.querySelectorAll('#curve .chip').forEach(x => x.classList.remove('on')); b.classList.add('on'); curve = b.dataset.k; });
-function hint() { const tx = $('txt').value.trim(), w = $('w').value.trim(); if (!tx) { $('th').textContent = '留空用内置新闻句。粘贴后整版报纸都用你的文字；其中含关键词的句子会成为高亮句。'; return; } const n = tx.split(/[。！？!?；;\n]+/).filter(x => w && x.includes(w)).length; $('th').textContent = n ? `✓ 已用你的正文排版，找到 ${n} 句含「${w}」，会轮流当高亮句。` : `✓ 已用你的正文排版。正文里没有「${w}」，高亮句暂用内置模板；想让高亮句也是你的话，就在正文里写进这个词。`; }
+function hint() { const tx = $('txt').value.trim(), w = $('w').value.trim(); if (!tx) { $('th').textContent = '留空用内置新闻句。粘贴后，含关键词的句子会轮流成为高亮句。'; return; } const n = tx.split(/[。！？!?；;\n]+/).filter(x => w && x.includes(w)).length; $('th').textContent = n ? `✓ 找到 ${n} 句含「${w}」，会轮流当高亮句。` : `正文里没有「${w}」，高亮句暂用内置模板；想让高亮句也是你的话，就在正文里写进这个词。`; }
 $('txt').oninput = hint; $('w').addEventListener('input', hint);
 $('imgs').onchange = e => { bgs = []; [...e.target.files].forEach(f => { const im = new Image(); im.onload = () => bgs.push(im); im.src = URL.createObjectURL(f); }); }; $('dur').oninput = () => $('dv').textContent = $('dur').value;
 $('go').onclick = async () => {
